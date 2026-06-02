@@ -1,0 +1,20 @@
+name: transmission-rpc
+version: 0.1.0
+description: |
+  A Crystal client for the Transmission BitTorrent RPC API (4.1.0+ JSON-RPC 2.0).
+
+authors:
+  - Paul M. Lambert <plambert@plambert.net>
+
+crystal: ">= 1.19.0"
+
+license: MIT
+
+dependencies:
+  json-rpc:
+    path: ../json-rpc.cr
+
+development_dependencies:
+  spectator:
+    gitlab: arctic-fox/spectator
+    version: "~> 0.11"
