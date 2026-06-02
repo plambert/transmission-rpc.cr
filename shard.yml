@@ -12,7 +12,7 @@ license: MIT
 
 dependencies:
   json-rpc:
-    path: ../json-rpc.cr
+    github: plambert/json-rpc.cr
 
 development_dependencies:
   spectator:
