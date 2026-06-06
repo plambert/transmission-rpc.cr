@@ -81,22 +81,41 @@ module Transmission::RPC
     # - `ids`: a single id/hash, an array of them, or `nil` for all torrents.
     # - `fields`: the fields to fetch (defaults to {DEFAULT_FIELDS}).
     # - `recently_active: true`: fetch only recently active torrents.
-    def torrent_get(ids = nil, fields : Array(String) = DEFAULT_FIELDS, *, recently_active : Bool = false) : Array(Torrent)
-      result = torrent_get_raw(ids, fields, recently_active: recently_active)
-      result["torrents"].as_a.map { |entry| Torrent.from_json(entry.to_json) }
+    # - `table: true`: request the compact `"table"` response format (arrays
+    #   instead of per-field objects) — a smaller payload for large result
+    #   sets. The rows are reassembled into {Torrent}s transparently.
+    def torrent_get(ids = nil, fields : Array(String) = DEFAULT_FIELDS, *, recently_active : Bool = false, table : Bool = false) : Array(Torrent)
+      entries = torrent_get_raw(ids, fields, recently_active: recently_active, table: table)["torrents"].as_a
+      table ? torrents_from_table(entries) : entries.map { |entry| Torrent.from_json(entry.to_json) }
     end
 
     # Like {#torrent_get} but returns the raw `JSON::Any` result, for fields
-    # not covered by the {Torrent} struct.
-    def torrent_get_raw(ids = nil, fields : Array(String) = DEFAULT_FIELDS, *, recently_active : Bool = false) : JSON::Any
+    # not covered by the {Torrent} struct. With `table: true` the `torrents`
+    # member is in Transmission's table layout (a header row followed by value
+    # rows).
+    def torrent_get_raw(ids = nil, fields : Array(String) = DEFAULT_FIELDS, *, recently_active : Bool = false, table : Bool = false) : JSON::Any
       built = Hash(String, JSON::Any).new
       built["fields"] = JSON.parse(fields.to_json)
+      built["format"] = JSON::Any.new("table") if table
       if recently_active
         built["ids"] = JSON::Any.new("recently_active")
       elsif wrapped = wrap_ids(ids)
         built["ids"] = JSON.parse(wrapped.to_json)
       end
       call("torrent_get", built)
+    end
+
+    # Reassembles a `"table"`-format `torrents` member (a header row of field
+    # names followed by one array of values per torrent) into {Torrent}s.
+    private def torrents_from_table(entries : Array(JSON::Any)) : Array(Torrent)
+      return [] of Torrent if entries.empty?
+      headers = entries.first.as_a.map(&.as_s)
+      entries[1..].map do |row|
+        values = row.as_a
+        object = {} of String => JSON::Any
+        headers.each_with_index { |name, index| object[name] = values[index]? || JSON::Any.new(nil) }
+        Torrent.from_json(object.to_json)
+      end
     end
 
     # Sets properties on the given torrents. Pass any mutable field as a

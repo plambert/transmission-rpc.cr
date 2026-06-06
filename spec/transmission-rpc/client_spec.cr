@@ -35,6 +35,20 @@ Spectator.describe Transmission::RPC::Client do
     end
   end
 
+  describe "#torrent_get table format" do
+    it "requests format table and reassembles rows into torrents" do
+      transport = RecordingTransport.new(
+        %({"jsonrpc":"2.0","result":{"torrents":[["id","name","status"],[1,"Ubuntu",4],[2,"Debian",6]]},"id":1}))
+      torrents = client_with(transport).torrent_get(fields: ["id", "name", "status"], table: true)
+
+      expect(transport.last_params["format"].as_s).to eq "table"
+      expect(torrents.size).to eq 2
+      expect(torrents.first.id).to eq 1
+      expect(torrents.first.name).to eq "Ubuntu"
+      expect(torrents[1].status).to eq 6
+    end
+  end
+
   describe "#torrent_start" do
     it "uses torrent_start by default" do
       transport = RecordingTransport.new
