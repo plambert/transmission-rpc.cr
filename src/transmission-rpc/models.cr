@@ -43,6 +43,10 @@ module Transmission::RPC
     getter bandwidth_priority : Int32?
     getter queue_position : Int32?
     getter peers_connected : Int32?
+    getter peers_getting_from_us : Int32?
+    getter peers_sending_to_us : Int32?
+    getter seconds_seeding : Int64?
+    getter seconds_downloading : Int64?
     getter download_dir : String?
     getter is_finished : Bool?
     getter is_stalled : Bool?
