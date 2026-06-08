@@ -121,6 +121,22 @@ Spectator.describe Transmission::RPC::Client do
       expect(torrent.state).to eq Transmission::RPC::Status::Download
     end
 
+    it "parses a classic table response whose header echoes camelCase field names" do
+      # The classic table header uses the requested camelCase field names; they
+      # must be normalized to snake_case or the Torrent model can't map them
+      # (the bug: completed idle torrents showed percent_done 0).
+      transport = RecordingTransport.new(
+        %({"arguments":{"torrents":[["id","name","percentDone","rateDownload","uploadRatio"],[1,"Ubuntu",1,0,2.5]]},"result":"success","tag":1}))
+      torrents = classic_client_with(transport).torrent_get([1], fields: ["id", "name", "percent_done", "rate_download", "upload_ratio"], table: true)
+
+      expect(torrents.size).to eq 1
+      torrent = torrents.first
+      expect(torrent.name).to eq "Ubuntu"
+      expect(torrent.percent_done).to eq 1.0
+      expect(torrent.rate_download).to eq 0
+      expect(torrent.upload_ratio).to eq 2.5
+    end
+
     it "parses a classic torrent-added result" do
       transport = RecordingTransport.new(
         %({"arguments":{"torrent-added":{"id":9,"name":"foo","hashString":"abc"}},"result":"success","tag":1}))

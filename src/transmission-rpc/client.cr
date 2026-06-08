@@ -138,10 +138,14 @@ module Transmission::RPC
     end
 
     # Reassembles a `"table"`-format `torrents` member (a header row of field
-    # names followed by one array of values per torrent) into {Torrent}s.
+    # names followed by one array of values per torrent) into {Torrent}s. The
+    # header names are normalized to `snake_case`: under the classic protocol the
+    # table header echoes the requested (`camelCase`) field names, which would
+    # otherwise not map onto the `snake_case` {Torrent} model. Idempotent for the
+    # modern protocol, whose header is already `snake_case`.
     private def torrents_from_table(entries : Array(JSON::Any)) : Array(Torrent)
       return [] of Torrent if entries.empty?
-      headers = entries.first.as_a.map(&.as_s)
+      headers = entries.first.as_a.map { |header| ClassicCodec.camel_to_snake(header.as_s) }
       entries[1..].map do |row|
         values = row.as_a
         object = {} of String => JSON::Any
