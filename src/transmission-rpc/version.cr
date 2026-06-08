@@ -1,3 +1,3 @@
 module Transmission::RPC
-  VERSION = "0.1.0"
+  VERSION = {{ `shard version '{{__DIR__}}'`.stringify }}
 end
