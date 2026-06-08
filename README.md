@@ -3,10 +3,20 @@
 A Crystal client for the [Transmission](https://transmissionbt.com/) BitTorrent daemon's
 [RPC API](https://github.com/transmission/transmission/blob/main/docs/rpc-spec.md).
 
-It targets the **JSON-RPC 2.0** protocol introduced in Transmission 4.1.0, where method names and
-fields use `snake_case`. It is built on [json-rpc](https://github.com/plambert/json-rpc.cr): a
-custom transport handles Transmission's `X-Transmission-Session-Id` CSRF dance, and the JSON-RPC
-client handles the envelope.
+It speaks **both** Transmission RPC dialects:
+
+- the **JSON-RPC 2.0** ("modern") protocol introduced in Transmission 4.1.0, where method names and
+  fields use `snake_case`, and
+- the original ("classic") protocol — `{"method":"torrent-get","arguments":{…},"tag":n}` with
+  hyphenated/`camelCase` keys and `camelCase` responses — understood by every version, and the only
+  one Transmission 4.0.x speaks.
+
+By default the client **auto-detects** which dialect the daemon speaks on its first call and caches
+the result; pass `protocol:` to force one. The public API is `snake_case` regardless of dialect.
+
+It is built on [json-rpc](https://github.com/plambert/json-rpc.cr): a custom transport handles
+Transmission's `X-Transmission-Session-Id` CSRF dance (shared by both dialects), and the JSON-RPC
+client handles the modern envelope.
 
 ## Installation
 
@@ -49,6 +59,17 @@ client.session_set(speed_limit_down: 1000, speed_limit_down_enabled: true)
 
 The default endpoint is `http://localhost:9091/transmission/rpc`, so `Transmission::RPC::Client.new`
 with no arguments talks to a local daemon.
+
+### Protocol selection
+
+The dialect is auto-detected by default. To force one (skipping the probe):
+
+```crystal
+client = Transmission::RPC::Client.new(url, protocol: Transmission::RPC::Protocol::Classic)
+client = Transmission::RPC::Client.new(url, protocol: Transmission::RPC::Protocol::Modern)
+# client.resolved_protocol reports which dialect is in use (nil until the first
+# call under the default Protocol::Auto).
+```
 
 ## Selecting torrents
 

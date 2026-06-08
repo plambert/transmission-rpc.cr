@@ -1,16 +1,25 @@
 require "json"
 require "json-rpc"
 require "./session_transport"
+require "./protocol"
 require "./models"
 
 module Transmission::RPC
   # A client for the Transmission BitTorrent RPC API.
   #
-  # Targets the JSON-RPC 2.0 protocol introduced in Transmission 4.1.0, where
-  # method names and fields use `snake_case`. Built on
-  # [json-rpc](https://github.com/plambert/json-rpc.cr): a {SessionTransport}
-  # handles the `X-Transmission-Session-Id` CSRF dance, and a
-  # `JSON::RPC::Client` handles the envelope.
+  # Speaks both Transmission dialects (see {Protocol}): the JSON-RPC 2.0
+  # *modern* protocol of 4.1.0+ and the *classic* protocol understood by every
+  # version (the only one 4.0.x speaks). The public API is `snake_case`
+  # throughout regardless of dialect; classic translation happens internally
+  # via {ClassicCodec}.
+  #
+  # By default the client auto-detects the daemon's dialect on its first call
+  # (probing once and caching the result). Pass `protocol:` to force one.
+  #
+  # Built on [json-rpc](https://github.com/plambert/json-rpc.cr): a
+  # {SessionTransport} handles the `X-Transmission-Session-Id` CSRF dance
+  # (shared by both dialects), and a `JSON::RPC::Client` handles the modern
+  # envelope.
   #
   # ```
   # client = Transmission::RPC::Client.new(
@@ -39,16 +48,39 @@ module Transmission::RPC
     # The underlying JSON-RPC client.
     getter rpc : JSON::RPC::Client
 
+    # The configured protocol mode. {Protocol::Auto} resolves to {Protocol::Modern}
+    # or {Protocol::Classic} on the first call.
+    getter protocol : Protocol
+
+    # The dialect resolved by auto-detection, or `nil` until the first call
+    # under {Protocol::Auto}. When `protocol` is forced this mirrors it.
+    getter resolved_protocol : Protocol?
+
+    # A monotonic counter for the classic `tag` member.
+    @tag_counter = Atomic(Int64).new(0)
+
     # Builds a client speaking to `url`, optionally with HTTP Basic auth.
-    def initialize(url : String | URI = DEFAULT_URL, *, username : String? = nil, password : String? = nil)
+    #
+    # `protocol` selects the dialect; the default {Protocol::Auto} probes the
+    # daemon on first use.
+    def initialize(url : String | URI, *, username : String? = nil, password : String? = nil, @protocol : Protocol = Protocol::Auto)
       transport = SessionTransport.new(url)
       transport.basic_auth(username, password) if username && password
       @rpc = JSON::RPC::Client.new(transport)
+      @resolved_protocol = @protocol unless @protocol.auto?
+    end
+
+    # Builds a client speaking to {DEFAULT_URL}, optionally with HTTP Basic
+    # auth. (Separate from the `url` overload so the JSON-RPC-client injection
+    # overload below stays unambiguous.)
+    def self.new(*, username : String? = nil, password : String? = nil, protocol : Protocol = Protocol::Auto) : self
+      new(DEFAULT_URL, username: username, password: password, protocol: protocol)
     end
 
     # Builds a client over an existing JSON-RPC client. Useful for injecting a
     # custom or stubbed transport.
-    def initialize(@rpc : JSON::RPC::Client)
+    def initialize(@rpc : JSON::RPC::Client, *, @protocol : Protocol = Protocol::Auto)
+      @resolved_protocol = @protocol unless @protocol.auto?
     end
 
     # --- Torrent actions -------------------------------------------------
@@ -286,8 +318,97 @@ module Transmission::RPC
 
     # --- internals -------------------------------------------------------
 
+    # Routes a call through the active dialect, returning the result as the
+    # same `JSON::Any` shape the modern path produces (so callers parsing
+    # `result["torrents"]` etc. work identically on both dialects).
     private def call(method : String, params = nil) : JSON::Any
-      @rpc.call(method, params)
+      case resolve_protocol
+      in Protocol::Classic
+        classic_call(method, params)
+      in Protocol::Modern
+        @rpc.call(method, params)
+      in Protocol::Auto
+        # resolve_protocol never returns Auto, but the case must be exhaustive.
+        @rpc.call(method, params)
+      end
+    end
+
+    # Returns the dialect to use, probing and caching once under
+    # {Protocol::Auto}.
+    private def resolve_protocol : Protocol
+      if resolved = @resolved_protocol
+        return resolved
+      end
+      detected = detect_protocol
+      @resolved_protocol = detected
+      detected
+    end
+
+    # Probes the daemon to decide between {Protocol::Modern} and
+    # {Protocol::Classic}.
+    #
+    # Issues a raw modern `session_get` and inspects the *raw* response at the
+    # transport layer (bypassing the strict json-rpc parser, which a classic
+    # reply would not satisfy). A classic daemon answers a modern method with
+    # `{"arguments":{},"result":"method name not recognized"}` — no `jsonrpc`
+    # member and a string `result` — so any response lacking a `jsonrpc`
+    # member is treated as classic.
+    private def detect_protocol : Protocol
+      probe = {jsonrpc: "2.0", method: "session_get", params: {} of String => JSON::Any, id: 0}
+      raw = @rpc.transport.call(probe.to_json)
+      parsed = JSON.parse(raw)
+      object = parsed.as_h?
+      if object && object.has_key?("jsonrpc")
+        Protocol::Modern
+      else
+        Protocol::Classic
+      end
+    rescue JSON::ParseException
+      # An unparseable probe response is not a modern envelope; fall back.
+      Protocol::Classic
+    end
+
+    # Performs a single classic-dialect call: builds the
+    # `{"method":…,"arguments":…,"tag":…}` envelope, translates the method
+    # name and argument keys, sends it through the session transport, checks
+    # `result == "success"`, and rewrites the `camelCase` `arguments` object
+    # to `snake_case` so it matches what the modern path returns.
+    private def classic_call(method : String, params = nil) : JSON::Any
+      arguments = classic_arguments(params)
+      request = {
+        "method"    => JSON::Any.new(ClassicCodec.method_name(method)),
+        "arguments" => JSON::Any.new(arguments),
+        "tag"       => JSON::Any.new(next_tag),
+      }
+      raw = @rpc.transport.call(request.to_json)
+      response = JSON.parse(raw)
+
+      result = response["result"]?.try(&.as_s?)
+      raise JSON::RPC::Error.new(0, result || "malformed classic response") if result != "success"
+
+      if returned = response["arguments"]?
+        ClassicCodec.snakecase_keys(returned)
+      else
+        JSON::Any.new({} of String => JSON::Any)
+      end
+    end
+
+    # Normalizes a modern `params` value into a `snake_case` arguments hash,
+    # then translates it to classic key spelling.
+    private def classic_arguments(params) : Hash(String, JSON::Any)
+      snake = case params
+              when Nil
+                Hash(String, JSON::Any).new
+              when Hash
+                params.transform_values { |value| value.is_a?(JSON::Any) ? value : JSON.parse(value.to_json) }
+              else
+                JSON.parse(params.to_json).as_h
+              end
+      ClassicCodec.arguments(snake)
+    end
+
+    private def next_tag : Int64
+      @tag_counter.add(1) + 1
     end
 
     # Builds an arguments object from keyword arguments, omitting any whose
