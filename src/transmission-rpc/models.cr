@@ -1,4 +1,5 @@
 require "json"
+require "uri"
 
 module Transmission::RPC
   # The activity state of a torrent, as reported by the `status` field.
@@ -10,6 +11,27 @@ module Transmission::RPC
     Download     = 4
     SeedWait     = 5
     Seed         = 6
+  end
+
+  # One entry of a torrent's `trackers` array. The field names are identical
+  # under the classic and modern protocols (all lowercase single words), so no
+  # key translation is needed. `sitename` is only present on newer daemons.
+  struct Tracker
+    include JSON::Serializable
+
+    getter announce : String?
+    getter scrape : String?
+    getter sitename : String?
+    getter tier : Int32?
+    getter id : Int32?
+
+    # The host portion of the announce URL (e.g. `tracker.example.com`), or nil
+    # when there is no announce URL or it can't be parsed.
+    def host : String?
+      announce.try { |url| URI.parse(url).host }
+    rescue URI::Error
+      nil
+    end
   end
 
   # A torrent as returned by `torrent_get`.
@@ -58,6 +80,7 @@ module Transmission::RPC
     getter done_date : Int64?
     getter start_date : Int64?
     getter activity_date : Int64?
+    getter trackers : Array(Tracker)?
 
     # The {Status} enum corresponding to the numeric `status` field, or `nil`
     # if `status` was not requested or is unrecognized.
