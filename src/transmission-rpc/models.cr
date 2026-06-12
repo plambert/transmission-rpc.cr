@@ -34,6 +34,29 @@ module Transmission::RPC
     end
   end
 
+  # One entry of a torrent's `tracker_stats` array: a tracker plus the swarm
+  # numbers the daemon learned from its own announces and scrapes. Counts are
+  # `-1` when the tracker hasn't reported them. Classic-protocol responses
+  # spell these `camelCase`; the classic adapter snake-cases every response
+  # key (recursively), so this model deserializes either dialect.
+  struct TrackerStat
+    include JSON::Serializable
+
+    getter id : Int32?
+    getter announce : String?
+    getter host : String?
+    getter sitename : String?
+    getter tier : Int32?
+    getter seeder_count : Int32?
+    getter leecher_count : Int32?
+    getter download_count : Int32?
+    getter last_scrape_time : Int64?
+    getter last_scrape_succeeded : Bool?
+    getter last_announce_time : Int64?
+    getter last_announce_succeeded : Bool?
+    getter last_announce_peer_count : Int32?
+  end
+
   # A torrent as returned by `torrent_get`.
   #
   # Every field is nilable: `torrent_get` only populates the fields the caller
@@ -81,6 +104,7 @@ module Transmission::RPC
     getter start_date : Int64?
     getter activity_date : Int64?
     getter trackers : Array(Tracker)?
+    getter tracker_stats : Array(TrackerStat)?
 
     # The {Status} enum corresponding to the numeric `status` field, or `nil`
     # if `status` was not requested or is unrecognized.

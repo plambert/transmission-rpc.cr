@@ -2,13 +2,15 @@ require "../spec_helper"
 
 Spectator.describe Transmission::RPC::Torrent do
   it "deserializes the trackers array" do
-    json = %({
-      "id": 1,
-      "trackers": [
-        {"announce": "https://tracker.example.com:443/announce", "tier": 0, "id": 5, "scrape": "https://tracker.example.com:443/scrape", "sitename": "example"},
-        {"announce": "udp://open.demonii.com:1337/announce", "tier": 1, "id": 6}
-      ]
-    })
+    json = <<-JSON
+      {
+        "id": 1,
+        "trackers": [
+          {"announce": "https://tracker.example.com:443/announce", "tier": 0, "id": 5, "scrape": "https://tracker.example.com:443/scrape", "sitename": "example"},
+          {"announce": "udp://open.demonii.com:1337/announce", "tier": 1, "id": 6}
+        ]
+      }
+      JSON
     torrent = Transmission::RPC::Torrent.from_json(json)
     trackers = torrent.trackers || raise "expected trackers"
     expect(trackers.size).to eq 2
@@ -19,6 +21,30 @@ Spectator.describe Transmission::RPC::Torrent do
 
   it "is nil when trackers were not requested" do
     expect(Transmission::RPC::Torrent.from_json(%({"id": 1})).trackers).to be_nil
+  end
+
+  it "deserializes the tracker_stats array" do
+    json = <<-JSON
+      {
+        "id": 1,
+        "tracker_stats": [
+          {"announce": "https://tracker.example.com:443/announce", "host": "tracker.example.com",
+           "seeder_count": 4, "leecher_count": 2, "download_count": -1,
+           "last_scrape_time": 1765000000, "last_scrape_succeeded": true}
+        ]
+      }
+      JSON
+    stats = Transmission::RPC::Torrent.from_json(json).tracker_stats || raise "expected tracker_stats"
+    expect(stats.size).to eq 1
+    expect(stats[0].seeder_count).to eq 4
+    expect(stats[0].leecher_count).to eq 2
+    expect(stats[0].download_count).to eq -1
+    expect(stats[0].last_scrape_time).to eq 1_765_000_000_i64
+    expect(stats[0].last_scrape_succeeded).to be_true
+  end
+
+  it "leaves tracker_stats nil when not requested" do
+    expect(Transmission::RPC::Torrent.from_json(%({"id": 1})).tracker_stats).to be_nil
   end
 end
 
