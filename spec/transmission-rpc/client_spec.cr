@@ -16,6 +16,13 @@ Spectator.describe Transmission::RPC::Client do
       expect(torrents.first.state).to eq Transmission::RPC::Status::Download
     end
 
+    it "parses the comment field" do
+      transport = RecordingTransport.new(
+        %({"jsonrpc":"2.0","result":{"torrents":[{"id":1,"comment":"Ubuntu CD releases.ubuntu.com"}]},"id":1}))
+      torrents = client_with(transport).torrent_get([1])
+      expect(torrents.first.comment).to eq "Ubuntu CD releases.ubuntu.com"
+    end
+
     it "wraps a scalar id into an array" do
       transport = RecordingTransport.new(%({"jsonrpc":"2.0","result":{"torrents":[]},"id":1}))
       client_with(transport).torrent_get(7)

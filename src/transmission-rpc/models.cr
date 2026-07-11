@@ -98,6 +98,7 @@ module Transmission::RPC
     getter is_private : Bool?
     getter error : Int32?
     getter error_string : String?
+    getter comment : String?
     getter labels : Array(String)?
     getter added_date : Int64?
     getter done_date : Int64?
